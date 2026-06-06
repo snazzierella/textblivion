@@ -1,0 +1,7 @@
+{
+  "name": "TTS v2 (2.1 WIP) - Textblivion: Elder Scrolls Adventure",
+  "description": "An interactive text-based adventure game set in the rich lore of the Elder Scrolls universe, powered by Gemini. Create your character and shape your destiny in Tamriel. Reduced usegameengine.ts, set gemini model, refined bedtime; testing bedtime",
+  "requestFramePermissions": [],
+  "prompt": "",
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
