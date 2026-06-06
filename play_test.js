@@ -11,8 +11,8 @@ async function run() {
   // Log browser console logs
   page.on('console', msg => console.log('BROWSER CONSOLE:', msg.text()));
 
-  console.log('Navigating to http://localhost:3001/...');
-  await page.goto('http://localhost:3001/', { waitUntil: 'networkidle2' });
+  console.log('Navigating to http://localhost:3000/...');
+  await page.goto('http://localhost:3000/', { waitUntil: 'networkidle2' });
 
   // Helper to wait and click by button text
   const clickButtonByText = async (text) => {

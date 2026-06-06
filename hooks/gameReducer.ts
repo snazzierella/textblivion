@@ -140,6 +140,9 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
           if (lastDm) {
             addEntryToLog('dm', lastDm.text, lastDm.promptNumber);
           }
+          if (loadedState.currentChoices && loadedState.currentChoices.length > 0) {
+            addEntryToLog('choices', loadedState.currentChoices);
+          }
           
           const charWithDefaults = loadedState.character ? {
             ...loadedState.character,
@@ -195,6 +198,9 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
         const lastDm = [...newNarrativeLog].reverse().find(entry => entry.type === 'dm');
         if (lastDm) {
           addEntryToLog('dm', lastDm.text, lastDm.promptNumber);
+        }
+        if (loadedState.currentChoices && loadedState.currentChoices.length > 0) {
+          addEntryToLog('choices', loadedState.currentChoices);
         }
 
         const charDefaults = loadedState.character ? {

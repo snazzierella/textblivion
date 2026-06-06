@@ -77,6 +77,33 @@ export const processGeminiResponse = (
     updatedState.phase = GamePhase.API_KEY_MISSING; 
     return updatedState;
   }
+
+  if (geminiActualResponse.error) {
+    let narrativeString: string;
+    if (typeof geminiActualResponse.narrative === 'string') {
+        narrativeString = geminiActualResponse.narrative;
+    } else if (Array.isArray(geminiActualResponse.narrative) && geminiActualResponse.narrative.every(item => typeof item === 'string')) {
+        narrativeString = (geminiActualResponse.narrative as string[]).join('\n');
+    } else {
+        narrativeString = "The mists of Oblivion swirl, and your connection to the threads of fate is temporarily lost. (Error communicating with the storyteller. Please try again.)";
+    }
+    
+    addEntryToLog('dm', narrativeString, currentState.promptNumber);
+    updatedState.lastDmNarrativeForTTS = narrativeString;
+    
+    if (context === 'SUMMARY_CORRECTION' || context === 'BEDTIME_SUMMARY_RECEIVED') {
+        updatedState.phase = GamePhase.AWAITING_BEDTIME_SUMMARY_CONFIRMATION;
+    } else if (context === 'FAINT_RECOVERY_DETAILS_RECEIVED') {
+        let modifiableCharacter = { ...currentChar };
+        modifiableCharacter.currentHealth = Math.max(1, Math.floor(modifiableCharacter.maxHealth * HEALTH_AFTER_FAINT_PERCENT));
+        updatedState.character = modifiableCharacter;
+        updatedState.phase = GamePhase.AWAITING_INPUT;
+    } else {
+        updatedState.phase = GamePhase.AWAITING_INPUT;
+    }
+    
+    return updatedState;
+  }
   
   let modifiableCharacter = { ...currentChar };
   let updatedInventory = { ...currentInventory, carried: [...currentInventory.carried], stashed: [...currentInventory.stashed] };
