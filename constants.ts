@@ -469,7 +469,7 @@ Key DM Rules:
 9.  **Output Format (JSON):** { "narrative": "...", "choices": [...], "timePassedHours": N.N, "itemUpdates": [...], "newQuests": [...], "updatedQuests": [{"title": "...", "isCompleted": true}], "itemsLostByName": ["Item Name"], "newActiveEffects": [{"sourceName": "...", "target": "attribute", "targetName": "Willpower", "modifier": 10, "durationHours": 24}], "hungerChange": -30, "exhaustionChange": -40 }
 `;
 
-export const GEMINI_MODEL_NAME = "gemini-3.5-flash"; 
+export const GEMINI_MODEL_NAME = "gemini-2.5-flash"; 
 export const MAX_NARRATIVE_LOG_LENGTH = 500;
 
 export const DM_COMMAND_PREFIX = "DM:";
