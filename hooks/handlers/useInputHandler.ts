@@ -33,6 +33,7 @@ interface UseInputHandlerProps {
 
 interface UseInputHandlerReturn {
   handlePlayerInput: (input: string, data?: CharacterCreationDataPayload) => Promise<void>;
+  handleRetry: () => Promise<void>;
 }
 
 
@@ -288,5 +289,32 @@ export const useInputHandler = ({
       setCharacterCreationState, 
     ]); 
 
-  return { handlePlayerInput };
+  const handleRetry = useCallback(async () => {
+    // 1. If bedtime summary failed, reset phase back to AWAITING_BEDTIME_SUMMARY_GENERATION to re-trigger effect
+    if (state.phase === GamePhase.AWAITING_BEDTIME_SUMMARY_CONFIRMATION) {
+      dispatch({ type: 'SET_PHASE', payload: GamePhase.AWAITING_BEDTIME_SUMMARY_GENERATION });
+      return;
+    }
+
+    // 2. If intro failed, reset phase back to ADVENTURE_INTRO to re-trigger effect
+    if (state.phase === GamePhase.AWAITING_INPUT && !state.lastPlayerInput) {
+      dispatch({ type: 'SET_PHASE', payload: GamePhase.ADVENTURE_INTRO });
+      return;
+    }
+
+    // 3. Standard turn retry (using lastPlayerInput)
+    if (state.lastPlayerInput) {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      try {
+        const strippedState = getStrippedStateForGemini(state);
+        const response = await getGameResponse(strippedState, state.lastPlayerInput);
+        dispatch({ type: 'PROCESS_GEMINI_RESPONSE', payload: { response, context: 'STANDARD_TURN' } });
+      } catch (error) {
+        dispatch({ type: 'ADD_ERROR_MESSAGE', payload: `Error processing input: ${(error as Error).message}` });
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
+    }
+  }, [state, dispatch]);
+
+  return { handlePlayerInput, handleRetry };
 };

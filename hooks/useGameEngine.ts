@@ -36,6 +36,7 @@ interface UseGameEngineReturn {
   state: GameState;
   dispatch: React.Dispatch<any>;
   handlePlayerInput: (input: string, data?: CharacterCreationDataPayload) => Promise<void>;
+  handleRetry: () => Promise<void>;
   characterCreationState: CharacterCreationData;
   ccStep: number;
   saveGameSlot: (slotId: string) => void;
@@ -130,7 +131,7 @@ export const useGameEngine = (): UseGameEngineReturn => {
     });
   }, [setCharacterCreationState]);
 
-  const { handlePlayerInput } = useInputHandler({
+  const { handlePlayerInput, handleRetry } = useInputHandler({
     state,
     dispatch,
     characterCreationState,
@@ -156,6 +157,7 @@ export const useGameEngine = (): UseGameEngineReturn => {
     state, 
     dispatch,
     handlePlayerInput, 
+    handleRetry,
     characterCreationState, 
     ccStep, 
     saveGameSlot, 

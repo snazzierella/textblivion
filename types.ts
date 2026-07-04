@@ -19,6 +19,7 @@ export enum GamePhase {
   PLAYER_FAINTED = 'PLAYER_FAINTED', 
   PLAYER_FAINTED_RECOVERY = 'PLAYER_FAINTED_RECOVERY',
   TARGET_MINIGAME_ACTIVE = 'TARGET_MINIGAME_ACTIVE',
+  AWAITING_AUTOSAVE_LOAD_CONFIRMATION = 'AWAITING_AUTOSAVE_LOAD_CONFIRMATION',
 }
 
 export enum TimeOfDay {
@@ -248,6 +249,11 @@ export interface GameState {
   currentTargetMinigameConfig?: TargetMinigameConfig | null;
   ttsEnabled: boolean;
   lastDmNarrativeForTTS: string | null;
+  lastCallFailed?: boolean;
+  lastPlayerInput?: string | null;
+  autosaveStateToLoad?: GameState | null;
+  fallbackManualSaveStateToLoad?: GameState | null;
+  autosaveTimestamp?: number | null;
   ttsNarratorVoiceURI: string | null;
   ttsPlayerVoiceURI: string | null;
   availableVoices: readonly TTSVoiceOption[];
@@ -399,4 +405,5 @@ export interface SaveSlotMetadata {
   currentProvince: string | null;
   currentCity: string | null;
   timestamp: string; // Formatted date string
+  unixTimestamp?: number;
 }

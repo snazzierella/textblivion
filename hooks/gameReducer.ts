@@ -4,7 +4,7 @@ import {
   CharacterSkill, SkillLevel, ActiveEffect, FaintConsequencesPayload,
   TimeOfDay, EnvironmentalCondition, ShelterQuality, WeatherCondition,
   TargetMinigameConfig, AteFoodDetail, Season, SubSeason, TTSVoiceOption, Attributes,
-  Skill, 
+  Skill, SaveSlotMetadata,
   GeminiResponse 
 } from '../types.ts';
 import {
@@ -58,6 +58,9 @@ export type Action =
   | { type: 'PROCESS_GEMINI_RESPONSE'; payload: { response: GeminiResponse; context: GeminiResponseContext } }
   | { type: 'ADD_PLAYER_INPUT_TO_LOG'; payload: string }
   | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'SET_PHASE'; payload: GamePhase }
+  | { type: 'CONFIRM_AUTOSAVE_LOAD' }
+  | { type: 'REJECT_AUTOSAVE_LOAD' }
   | { type: 'REQUEST_BEDTIME_INTENT_CONFIRMATION' }
   | { type: 'CANCEL_BEDTIME_INTENT' }
   | { type: 'EXECUTE_NAP' }
@@ -113,6 +116,73 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
       newNarrativeLog.shift();
     }
   };
+  
+  const prepareLoadedGameState = (loadedState: GameState): GameState => {
+    // Restore saved narrative history and append the loading success message.
+    newNarrativeLog = [...(loadedState.narrativeLog || [])];
+    
+    // Repeat the last DM prompt so the player can see it and get back into context.
+    const lastDm = [...newNarrativeLog].reverse().find(entry => entry.type === 'dm');
+    if (lastDm) {
+      addEntryToLog('dm', lastDm.text, lastDm.promptNumber);
+    }
+    if (loadedState.currentChoices && loadedState.currentChoices.length > 0) {
+      addEntryToLog('choices', loadedState.currentChoices);
+    }
+    
+    const charWithDefaults = loadedState.character ? {
+      ...loadedState.character,
+      currentHealth: loadedState.character.currentHealth ?? BASE_MAX_HEALTH, 
+      maxHealth: loadedState.character.maxHealth ?? BASE_MAX_HEALTH,
+      currentMana: loadedState.character.currentMana ?? BASE_MAX_MANA, 
+      maxMana: loadedState.character.maxMana ?? BASE_MAX_MANA,
+      currentFatigue: loadedState.character.currentFatigue ?? BASE_MAX_FATIGUE, 
+      maxFatigue: loadedState.character.maxFatigue ?? BASE_MAX_FATIGUE,
+      hungerLevel: loadedState.character.hungerLevel ?? INITIAL_HUNGER_LEVEL, 
+      exhaustionLevel: loadedState.character.exhaustionLevel ?? INITIAL_EXHAUSTION_LEVEL,
+      comfortLevel: loadedState.character.comfortLevel ?? INITIAL_COMFORT_LEVEL, 
+      maxComfort: loadedState.character.maxComfort ?? BASE_MAX_COMFORT,
+      skills: loadedState.character.skills || [],
+    } : null;
+    
+    if (charWithDefaults) {
+      const existingSkillNames = charWithDefaults.skills.map(s => s.skill);
+      SKILLS_LIST.forEach(skillName => {
+        if (!existingSkillNames.includes(skillName)) {
+          charWithDefaults.skills.push({ skill: skillName, value: 5, level: getSkillLevel(5), isMajor: false });
+        } else { 
+          const skillToUpdate = charWithDefaults.skills.find(s => s.skill === skillName); 
+          if (skillToUpdate) skillToUpdate.level = getSkillLevel(skillToUpdate.value); 
+        }
+      });
+    }
+
+    const loadedSeasons = calculateCurrentSeasonAndSubSeason(loadedState.currentDayNumber || INITIAL_DAY_NUMBER);
+    const loadedLatFactor = getLatitudeFactor(loadedState.currentProvince || charWithDefaults?.startingProvince || null, loadedState.currentCity || null);
+    const loadedEnv = calculateEnvironmentalCondition(loadedState.currentWeather || INITIAL_WEATHER_CONDITION, loadedSeasons.season, loadedSeasons.subSeason, loadedLatFactor, loadedState.currentTimeOfDay || INITIAL_TIME_OF_DAY);
+    if (charWithDefaults) charWithDefaults.comfortLevel = calculateComfortLevel(charWithDefaults.equippedItems, loadedEnv, loadedState.currentShelter || INITIAL_SHELTER_QUALITY);
+
+    const ttsText = lastDm ? (typeof lastDm.text === 'string' ? lastDm.text : (Array.isArray(lastDm.text) ? lastDm.text.join('\n') : null)) : (loadedState.lastDmNarrativeForTTS || null);
+
+    return {
+      ...getInitialState(), 
+      ...loadedState, 
+      character: charWithDefaults, 
+      narrativeLog: newNarrativeLog, 
+      currentSeason: loadedSeasons.season, 
+      currentSubSeason: loadedSeasons.subSeason,
+      currentEnvironmentalCondition: loadedEnv, 
+      currentTargetMinigameConfig: null, 
+      levelUpIsFromBedtime: loadedState.levelUpIsFromBedtime || false,
+      lastDmNarrativeForTTS: ttsText,
+      lastCallFailed: false,
+      lastPlayerInput: null,
+      apiKeyAvailable: true,
+      autosaveStateToLoad: null,
+      fallbackManualSaveStateToLoad: null,
+      autosaveTimestamp: null,
+    };
+  };
 
   if (action.type.startsWith('DEBUG_') || action.type === 'TOGGLE_DEBUG_MODE') {
       const debugState = debugReducer(state, action, addEntryToLog);
@@ -125,108 +195,112 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
     case 'SET_API_KEY_STATUS':
       return { ...state, apiKeyAvailable: action.payload.available, phase: action.payload.phase };
 
-    case 'ATTEMPT_INITIAL_LOAD':
+    case 'ATTEMPT_INITIAL_LOAD': {
       try {
-        const savedData = localStorage.getItem(LOCAL_STORAGE_SAVE_KEY);
-        if (savedData) {
-          const loadedState = JSON.parse(savedData) as GameState;
-          
-          // Restore saved narrative history and append the loading success message.
-          newNarrativeLog = [...(loadedState.narrativeLog || [])];
-          addEntryToLog('system', 'Welcome back! Loaded your saved game.');
-          
-          // Repeat the last DM prompt so the player can see it and get back into context.
-          const lastDm = [...newNarrativeLog].reverse().find(entry => entry.type === 'dm');
-          if (lastDm) {
-            addEntryToLog('dm', lastDm.text, lastDm.promptNumber);
-          }
-          if (loadedState.currentChoices && loadedState.currentChoices.length > 0) {
-            addEntryToLog('choices', loadedState.currentChoices);
-          }
-          
-          const charWithDefaults = loadedState.character ? {
-            ...loadedState.character,
-            currentHealth: loadedState.character.currentHealth ?? BASE_MAX_HEALTH, maxHealth: loadedState.character.maxHealth ?? BASE_MAX_HEALTH,
-            currentMana: loadedState.character.currentMana ?? BASE_MAX_MANA, maxMana: loadedState.character.maxMana ?? BASE_MAX_MANA,
-            currentFatigue: loadedState.character.currentFatigue ?? BASE_MAX_FATIGUE, maxFatigue: loadedState.character.maxFatigue ?? BASE_MAX_FATIGUE,
-            hungerLevel: loadedState.character.hungerLevel ?? INITIAL_HUNGER_LEVEL, exhaustionLevel: loadedState.character.exhaustionLevel ?? INITIAL_EXHAUSTION_LEVEL,
-            comfortLevel: loadedState.character.comfortLevel ?? INITIAL_COMFORT_LEVEL, maxComfort: loadedState.character.maxComfort ?? BASE_MAX_COMFORT,
-            skills: loadedState.character.skills || [],
-          } : null;
-           if (charWithDefaults) {
-            const existingSkillNames = charWithDefaults.skills.map(s => s.skill);
-            SKILLS_LIST.forEach(skillName => {
-                if (!existingSkillNames.includes(skillName)) {
-                    charWithDefaults.skills.push({ skill: skillName, value: 5, level: getSkillLevel(5), isMajor: false });
-                } else { const skillToUpdate = charWithDefaults.skills.find(s => s.skill === skillName); if (skillToUpdate) skillToUpdate.level = getSkillLevel(skillToUpdate.value); }
-            });
-          }
+        // 1. Find the newest manual save slot
+        const storedSlots = localStorage.getItem('textblivion_save_slots');
+        let newestManualState: GameState | null = null;
+        let newestManualTimestamp = 0;
+        let newestManualSlotId: string | null = null;
 
-          const loadedSeasons = calculateCurrentSeasonAndSubSeason(loadedState.currentDayNumber || INITIAL_DAY_NUMBER);
-          const loadedLatFactor = getLatitudeFactor(loadedState.currentProvince || charWithDefaults?.startingProvince || null, loadedState.currentCity || null);
-          const loadedEnv = calculateEnvironmentalCondition(loadedState.currentWeather || INITIAL_WEATHER_CONDITION, loadedSeasons.season, loadedSeasons.subSeason, loadedLatFactor, loadedState.currentTimeOfDay || INITIAL_TIME_OF_DAY);
-          if (charWithDefaults) charWithDefaults.comfortLevel = calculateComfortLevel(charWithDefaults.equippedItems, loadedEnv, loadedState.currentShelter || INITIAL_SHELTER_QUALITY);
+        if (storedSlots) {
+          const slotsList = JSON.parse(storedSlots) as SaveSlotMetadata[];
+          let newestSlot: SaveSlotMetadata | null = null;
+          
+          slotsList.forEach(slot => {
+            const ts = slot.unixTimestamp || (slot.timestamp ? new Date(slot.timestamp).getTime() : 0);
+            if (ts > newestManualTimestamp) {
+              newestManualTimestamp = ts;
+              newestSlot = slot;
+            }
+          });
 
-          const ttsText = lastDm ? (typeof lastDm.text === 'string' ? lastDm.text : (Array.isArray(lastDm.text) ? lastDm.text.join('\n') : null)) : (loadedState.lastDmNarrativeForTTS || null);
+          if (newestSlot) {
+            newestManualSlotId = (newestSlot as SaveSlotMetadata).id;
+            const slotData = localStorage.getItem(`textblivion_save_slot_${newestManualSlotId}`);
+            if (slotData) {
+              newestManualState = JSON.parse(slotData) as GameState;
+            }
+          }
+        }
 
+        // Check legacy save as well
+        const legacyData = localStorage.getItem(LOCAL_STORAGE_SAVE_KEY);
+        if (legacyData && !newestManualState) {
+          newestManualState = JSON.parse(legacyData) as GameState;
+          newestManualTimestamp = 1; // Treat it as older than any active slots
+        }
+
+        // 2. Check for autosave
+        const autosaveData = localStorage.getItem('textblivion_autosave');
+        const autosaveTimestampStr = localStorage.getItem('textblivion_autosave_timestamp');
+        let autosaveState: GameState | null = null;
+        let autosaveTimestamp = 0;
+
+        if (autosaveData && autosaveTimestampStr) {
+          try {
+            autosaveState = JSON.parse(autosaveData) as GameState;
+            autosaveTimestamp = parseInt(autosaveTimestampStr, 10) || 0;
+          } catch (err) {
+            console.error("Failed to parse autosave data:", err);
+          }
+        }
+
+        // 3. Compare and load
+        if (autosaveState && autosaveTimestamp > newestManualTimestamp) {
+          // Autosave is strictly newer! Prompt the user
+          addEntryToLog('system', 'Newer unsaved progress detected.');
           return {
-            ...getInitialState(), ...loadedState, character: charWithDefaults, apiKeyAvailable: true,
-            phase: (loadedState.phase === GamePhase.PLAYER_FAINTED || loadedState.phase === GamePhase.PLAYER_FAINTED_RECOVERY || loadedState.phase === GamePhase.TARGET_MINIGAME_ACTIVE || loadedState.phase === GamePhase.AWAITING_POST_LEVELUP_REST) ? GamePhase.AWAITING_INPUT : (loadedState.phase || GamePhase.AWAITING_INPUT),
-            narrativeLog: newNarrativeLog, currentSeason: loadedSeasons.season, currentSubSeason: loadedSeasons.subSeason,
-            currentEnvironmentalCondition: loadedEnv, currentTargetMinigameConfig: null, 
-            levelUpIsFromBedtime: loadedState.levelUpIsFromBedtime || false,
-            lastDmNarrativeForTTS: ttsText,
+            ...state,
+            phase: GamePhase.AWAITING_AUTOSAVE_LOAD_CONFIRMATION,
+            autosaveStateToLoad: autosaveState,
+            fallbackManualSaveStateToLoad: newestManualState,
+            autosaveTimestamp: autosaveTimestamp,
+            narrativeLog: newNarrativeLog,
           };
+        } else if (newestManualState) {
+          // Manual save is newer or equal, load it automatically
+          addEntryToLog('system', 'Welcome back! Loaded your most recent saved game.');
+          return prepareLoadedGameState(newestManualState);
         } else {
+          // No saves found
           addEntryToLog('system', 'No saved game found. Starting a new adventure!');
           return { ...getInitialState(), apiKeyAvailable: true, phase: GamePhase.CHARACTER_CREATION, narrativeLog: newNarrativeLog };
         }
       } catch (e) {
-        addEntryToLog('error', `Error loading saved game: ${(e as Error).message}. Starting a new adventure.`);
-        localStorage.removeItem(LOCAL_STORAGE_SAVE_KEY);
+        addEntryToLog('error', `Error during initial load: ${(e as Error).message}. Starting a new adventure.`);
         return { ...getInitialState(), apiKeyAvailable: true, phase: GamePhase.CHARACTER_CREATION, narrativeLog: newNarrativeLog };
       }
+    }
 
     case 'LOAD_GAME_SUCCESS': {
-        const loadedState = action.payload;
-        
-        // Restore saved narrative history and append loading confirmation.
-        newNarrativeLog = [...(loadedState.narrativeLog || [])];
-        addEntryToLog('system', 'Game Loaded Successfully.');
-        
-        // Repeat the last DM prompt so the player can see it and get back into context.
-        const lastDm = [...newNarrativeLog].reverse().find(entry => entry.type === 'dm');
-        if (lastDm) {
-          addEntryToLog('dm', lastDm.text, lastDm.promptNumber);
-        }
-        if (loadedState.currentChoices && loadedState.currentChoices.length > 0) {
-          addEntryToLog('choices', loadedState.currentChoices);
-        }
+      addEntryToLog('system', 'Game Loaded Successfully.');
+      return prepareLoadedGameState(action.payload);
+    }
 
-        const charDefaults = loadedState.character ? {
-            ...loadedState.character, skills: loadedState.character.skills || [] 
-        } : null;
-         if (charDefaults) {
-            const existingSkillNames = charDefaults.skills.map(s => s.skill);
-            SKILLS_LIST.forEach(skillName => {
-                if (!existingSkillNames.includes(skillName)) {
-                    charDefaults.skills.push({ skill: skillName, value: 5, level: getSkillLevel(5), isMajor: false });
-                } else { const skillToUpdate = charDefaults.skills.find(s => s.skill === skillName); if (skillToUpdate) skillToUpdate.level = getSkillLevel(skillToUpdate.value); }
-            });
-          }
-        
-        const ttsText = lastDm ? (typeof lastDm.text === 'string' ? lastDm.text : (Array.isArray(lastDm.text) ? lastDm.text.join('\n') : null)) : (loadedState.lastDmNarrativeForTTS || null);
+    case 'CONFIRM_AUTOSAVE_LOAD': {
+      if (state.autosaveStateToLoad) {
+        addEntryToLog('system', 'Restored unsaved progress.');
+        return prepareLoadedGameState(state.autosaveStateToLoad);
+      }
+      return state;
+    }
 
-        return { 
-          ...getInitialState(), 
-          ...loadedState, 
-          character: charDefaults, 
-          narrativeLog: newNarrativeLog, 
-          apiKeyAvailable: true, 
-          currentTargetMinigameConfig: null, 
-          levelUpIsFromBedtime: loadedState.levelUpIsFromBedtime || false,
-          lastDmNarrativeForTTS: ttsText
-        };
+    case 'REJECT_AUTOSAVE_LOAD': {
+      try {
+        localStorage.removeItem('textblivion_autosave');
+        localStorage.removeItem('textblivion_autosave_timestamp');
+      } catch (e) {
+        console.error("Failed to clear autosave:", e);
+      }
+      
+      if (state.fallbackManualSaveStateToLoad) {
+        addEntryToLog('system', 'Welcome back! Loaded your most recent saved game.');
+        return prepareLoadedGameState(state.fallbackManualSaveStateToLoad);
+      } else {
+        addEntryToLog('system', 'Starting a new adventure!');
+        return { ...getInitialState(), apiKeyAvailable: true, phase: GamePhase.CHARACTER_CREATION, narrativeLog: newNarrativeLog };
+      }
     }
 
     case 'MANUAL_LOAD_FAILURE':
@@ -276,6 +350,61 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
       const initialLatFactor = getLatitudeFactor(pcBase.startingProvince, null);
       const initialEnv = calculateEnvironmentalCondition(INITIAL_WEATHER_CONDITION, initialSeasons.season, initialSeasons.subSeason, initialLatFactor, INITIAL_TIME_OF_DAY);
 
+      let startingEquipped: Item[] = [];
+      let startingCarried: Item[] = [];
+
+      switch (pcBase.archetype) {
+        case 'Warrior':
+        case 'Spellsword':
+          startingEquipped = [
+            { id: 'starting_iron_armor', name: "Iron Armor", description: "Heavy plate armor providing decent defense.", quantity: 1, insulationQuality: 'average', comfortBonus: 5, isEquippable: true }
+          ];
+          startingCarried = [
+            { id: 'starting_iron_sword', name: "Iron Sword", description: "A standard one-handed iron sword.", quantity: 1, isEquippable: true },
+            { id: 'starting_iron_shield', name: "Iron Shield", description: "A sturdy iron shield to deflect blows.", quantity: 1, isEquippable: true },
+            { id: 'default_clothes', name: "Basic Clothes", description: "Simple traveler's attire.", quantity: 1, insulationQuality: 'poor', comfortBonus: 0, isEquippable: true }
+          ];
+          break;
+        case 'Mage':
+          startingEquipped = [
+            { id: 'starting_novice_robes', name: "Novice Robes", description: "Simple woolen robes suitable for magic users.", quantity: 1, insulationQuality: 'average', comfortBonus: 5, isEquippable: true }
+          ];
+          startingCarried = [
+            { id: 'starting_iron_dagger', name: "Iron Dagger", description: "A small, fast iron dagger.", quantity: 1, isEquippable: true },
+            { id: 'default_clothes', name: "Basic Clothes", description: "Simple traveler's attire.", quantity: 1, insulationQuality: 'poor', comfortBonus: 0, isEquippable: true }
+          ];
+          break;
+        case 'Archer':
+          startingEquipped = [
+            { id: 'starting_leather_armor', name: "Leather Armor", description: "Light leather jerkin that offers decent mobility.", quantity: 1, insulationQuality: 'average', comfortBonus: 3, isEquippable: true }
+          ];
+          startingCarried = [
+            { id: 'starting_hunting_bow', name: "Hunting Bow", description: "A reliable wooden bow for hunting and combat.", quantity: 1, isEquippable: true },
+            { id: 'starting_iron_arrows', name: "Iron Arrow", description: "Basic arrows with iron tips.", quantity: 20 },
+            { id: 'starting_iron_dagger', name: "Iron Dagger", description: "A small, fast iron dagger.", quantity: 1, isEquippable: true },
+            { id: 'default_clothes', name: "Basic Clothes", description: "Simple traveler's attire.", quantity: 1, insulationQuality: 'poor', comfortBonus: 0, isEquippable: true }
+          ];
+          break;
+        case 'Thief':
+        case 'Assassin':
+        case 'Nightblade':
+          startingEquipped = [
+            { id: 'starting_leather_armor', name: "Leather Armor", description: "Light leather jerkin that offers decent mobility.", quantity: 1, insulationQuality: 'average', comfortBonus: 3, isEquippable: true }
+          ];
+          startingCarried = [
+            { id: 'starting_steel_dagger', name: "Steel Dagger", description: "A finely crafted steel dagger.", quantity: 1, isEquippable: true },
+            { id: 'starting_lockpicks', name: "Lockpick", description: "A tool for picking locks.", quantity: 5 },
+            { id: 'default_clothes', name: "Basic Clothes", description: "Simple traveler's attire.", quantity: 1, insulationQuality: 'poor', comfortBonus: 0, isEquippable: true }
+          ];
+          break;
+        default:
+          startingEquipped = [
+            { id: 'default_clothes', name: "Basic Clothes", description: "Simple traveler's attire.", quantity: 1, insulationQuality: 'poor', comfortBonus: 0, isEquippable: true }
+          ];
+          startingCarried = [];
+          break;
+      }
+
       const finalizedCharacter: PlayerCharacter = {
         ...pcBase, skills: allCharacterSkills,
         level: 1,
@@ -285,6 +414,7 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
         hungerLevel: INITIAL_HUNGER_LEVEL, exhaustionLevel: INITIAL_EXHAUSTION_LEVEL,
         maxComfort: BASE_MAX_COMFORT, comfortLevel: INITIAL_COMFORT_LEVEL,
         characterImageUrl: null, characterImageGenerationFailed: false, characterImageUrlIsGeneric: false,
+        equippedItems: startingEquipped,
       };
       finalizedCharacter.comfortLevel = calculateComfortLevel(finalizedCharacter.equippedItems, initialEnv, INITIAL_SHELTER_QUALITY);
       addEntryToLog('system', `Character ${finalizedCharacter.name} created. Starting province: ${finalizedCharacter.startingProvince}.`);
@@ -294,7 +424,7 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
         currentTimeOfDay: INITIAL_TIME_OF_DAY, currentHourInDay: INITIAL_HOUR_IN_DAY,
         currentSeason: initialSeasons.season, currentSubSeason: initialSeasons.subSeason,
         phase: GamePhase.ADVENTURE_INTRO, narrativeLog: newNarrativeLog,
-        inventory: { carried: finalizedCharacter.equippedItems, stashed: [], septims: INITIAL_SEPTIMS },
+        inventory: { carried: [...startingEquipped, ...startingCarried], stashed: [], septims: INITIAL_SEPTIMS },
         permanentSkillUpsSinceLastLevelUp: 0, attributePointsToAllocateForLevelUp: 0, activeEffects: [], levelUpIsFromBedtime: false,
       };
     }
@@ -313,9 +443,11 @@ export const gameReducer = (state: GameState, action: Action): GameState => {
 
     case 'ADD_PLAYER_INPUT_TO_LOG':
       addEntryToLog('player', action.payload);
-      return { ...state, narrativeLog: newNarrativeLog, currentChoices: [] };
+      return { ...state, narrativeLog: newNarrativeLog, currentChoices: [], lastPlayerInput: action.payload };
     case 'SET_LOADING':
       return { ...state, phase: action.payload ? GamePhase.PROCESSING_INPUT : GamePhase.AWAITING_INPUT };
+    case 'SET_PHASE':
+      return { ...state, phase: action.payload };
 
     case 'REQUEST_BEDTIME_INTENT_CONFIRMATION':
       addEntryToLog('system', "Are you sure you want to end the day and go to bed? (Type 'yes' to confirm, 'no' to cancel)");

@@ -7,9 +7,11 @@ interface PlayerInputProps {
   disabled: boolean;
   placeholder?: string;
   currentPhase?: GamePhase; 
+  lastCallFailed?: boolean;
+  onRetry?: () => void;
 }
 
-const PlayerInput: React.FC<PlayerInputProps> = ({ onSubmit, disabled, placeholder, currentPhase }) => {
+const PlayerInput: React.FC<PlayerInputProps> = ({ onSubmit, disabled, placeholder, currentPhase, lastCallFailed, onRetry }) => {
   const [input, setInput] = useState('');
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -33,7 +35,7 @@ const PlayerInput: React.FC<PlayerInputProps> = ({ onSubmit, disabled, placehold
 
 
   return (
-    <form onSubmit={handleSubmit} className="p-4 border-t border-gray-700 bg-gray-900 shadow- ऊपर">
+    <form onSubmit={handleSubmit} className="p-4 border-t border-gray-700 bg-gray-900 shadow-lg">
       <input
         type="text"
         value={input}
@@ -43,13 +45,27 @@ const PlayerInput: React.FC<PlayerInputProps> = ({ onSubmit, disabled, placehold
         placeholder={dynamicPlaceholder}
         autoFocus
       />
-      <button 
-        type="submit" 
-        disabled={disabled || !input.trim()}
-        className="mt-3 w-full p-3 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold transition-colors duration-150 disabled:bg-gray-500 disabled:cursor-not-allowed"
-      >
-        Send
-      </button>
+      <div className="flex flex-col sm:flex-row gap-2 mt-3">
+        <button 
+          type="submit" 
+          disabled={disabled || !input.trim()}
+          className="flex-1 p-3 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold transition-colors duration-150 disabled:bg-gray-500 disabled:cursor-not-allowed"
+        >
+          Send
+        </button>
+        {lastCallFailed && onRetry && (
+          <button 
+            type="button" 
+            onClick={onRetry}
+            className="flex-1 p-3 bg-gradient-to-r from-red-800 to-rose-950 hover:from-red-700 hover:to-rose-900 text-amber-100 rounded-lg font-semibold transition-all duration-150 shadow-md flex items-center justify-center gap-2 border border-red-500/30 hover:scale-[1.01]"
+          >
+            <svg className="w-5 h-5 animate-pulse text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89M9 11l3 3L22 4" />
+            </svg>
+            Retry Storyteller
+          </button>
+        )}
+      </div>
     </form>
   );
 };

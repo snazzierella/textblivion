@@ -63,6 +63,7 @@ export const useGameManagement = (
         currentProvince: state.currentProvince,
         currentCity: state.currentCity,
         timestamp: new Date().toLocaleString(),
+        unixTimestamp: Date.now(),
       };
 
       const stored = localStorage.getItem(METADATA_KEY);
@@ -129,6 +130,7 @@ export const useGameManagement = (
         currentProvince: parsedState.currentProvince,
         currentCity: parsedState.currentCity,
         timestamp: new Date().toLocaleString(),
+        unixTimestamp: Date.now(),
       };
 
       const stored = localStorage.getItem(METADATA_KEY);

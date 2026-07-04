@@ -25,6 +25,7 @@ const App: React.FC = () => {
     state, 
     dispatch,
     handlePlayerInput, 
+    handleRetry,
     characterCreationState, 
     ccStep, 
     saveGameSlot, 
@@ -56,6 +57,18 @@ const App: React.FC = () => {
   const [isSoundSettingsModalOpen, setIsSoundSettingsModalOpen] = React.useState(false);
   const [isSaveLoadModalOpen, setIsSaveLoadModalOpen] = React.useState(false);
   const [showMobileSidebars, setShowMobileSidebars] = useState(false);
+
+  // Autosave game state on updates
+  React.useEffect(() => {
+    if (state.character && state.phase !== GamePhase.CHARACTER_CREATION && state.phase !== GamePhase.AWAITING_AUTOSAVE_LOAD_CONFIRMATION) {
+      try {
+        localStorage.setItem('textblivion_autosave', JSON.stringify(state));
+        localStorage.setItem('textblivion_autosave_timestamp', Date.now().toString());
+      } catch (e) {
+        console.error('Failed to autosave game state:', e);
+      }
+    }
+  }, [state]);
 
   const calculatedShowSidePanels = state.character &&
     state.phase !== GamePhase.CHARACTER_CREATION &&
@@ -193,6 +206,8 @@ const App: React.FC = () => {
           onSubmit={handlePlayerInput}
           disabled={false}
           currentPhase={state.phase} 
+          lastCallFailed={state.lastCallFailed}
+          onRetry={handleRetry}
         />
       );
     }
@@ -258,6 +273,51 @@ const App: React.FC = () => {
         break;
     }
     return <div className="p-3">{content}</div>;
+  };
+
+  const renderAutosaveModal = () => {
+    if (state.phase !== GamePhase.AWAITING_AUTOSAVE_LOAD_CONFIRMATION) return null;
+
+    const autosaveTime = state.autosaveTimestamp 
+      ? new Date(state.autosaveTimestamp).toLocaleString() 
+      : 'Unknown Time';
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+        <div className="w-full max-w-md bg-slate-900/90 border border-amber-500/30 rounded-xl p-6 shadow-2xl backdrop-blur-md relative overflow-hidden">
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-600 animate-pulse"></div>
+          
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 bg-amber-500/10 rounded-lg text-amber-500">
+              <svg className="w-6 h-6 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <h3 className="text-xl font-bold text-amber-100 font-serif font-semibold">Autosave Detected</h3>
+          </div>
+
+          <p className="text-sm text-slate-300 leading-relaxed mb-6">
+            An unsaved game session from <span className="text-amber-400 font-semibold">{autosaveTime}</span> was found. 
+            This autosave is newer than your manual save. Would you like to restore it to continue playing?
+          </p>
+
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => dispatch({ type: 'CONFIRM_AUTOSAVE_LOAD' })}
+              className="w-full p-3 bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-slate-950 font-bold rounded-lg transition-all duration-150 shadow-md flex items-center justify-center gap-2 hover:scale-[1.01]"
+            >
+              Restore Unsaved Progress
+            </button>
+            <button
+              onClick={() => dispatch({ type: 'REJECT_AUTOSAVE_LOAD' })}
+              className="w-full p-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-semibold transition-colors duration-150"
+            >
+              {state.fallbackManualSaveStateToLoad ? "Load Most Recent Manual Save" : "Start New Game"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -459,6 +519,7 @@ const App: React.FC = () => {
         onDeleteSlot={deleteGameSlot}
         onImportLegacy={importLegacySave}
       />
+      {renderAutosaveModal()}
     </div>
   );
 };

@@ -90,6 +90,7 @@ export const processGeminiResponse = (
     
     addEntryToLog('dm', narrativeString, currentState.promptNumber);
     updatedState.lastDmNarrativeForTTS = narrativeString;
+    updatedState.lastCallFailed = true;
     
     if (context === 'SUMMARY_CORRECTION' || context === 'BEDTIME_SUMMARY_RECEIVED') {
         updatedState.phase = GamePhase.AWAITING_BEDTIME_SUMMARY_CONFIRMATION;
@@ -109,6 +110,7 @@ export const processGeminiResponse = (
   let updatedInventory = { ...currentInventory, carried: [...currentInventory.carried], stashed: [...currentInventory.stashed] };
   let updatedActiveEffects = [...currentActiveEffects];
   let updatedPermanentSkillUps = currentState.permanentSkillUpsSinceLastLevelUp;
+  updatedState.lastCallFailed = false;
 
   // 1. Narrative and Choices
   let narrativeString: string;
