@@ -180,9 +180,27 @@ export const getGameResponse = async (
 
   } catch (error) {
     console.error("Error calling Gemini API or parsing response:", error);
+    
+    const errMsg = (error as Error).message || "Unknown error";
+    const errString = (typeof error === 'object' && error !== null) 
+      ? JSON.stringify(error).toLowerCase() + " " + errMsg.toLowerCase()
+      : errMsg.toLowerCase();
+      
+    let narrative = "The mists of Oblivion swirl, and your connection to the threads of fate is temporarily lost. (Error communicating with the storyteller. Please try again.)";
+    
+    if (errString.includes("429") || errString.includes("quota") || errString.includes("exhausted") || errString.includes("rate limit")) {
+      narrative = "The mists of Oblivion swirl, and your connection to the threads of fate is temporarily lost. (Error: Gemini API Quota Limit Exceeded. You have hit the Google AI Studio rate limit. Please wait 15-30 seconds before clicking Retry.)";
+    } else if (errString.includes("503") || errString.includes("demand") || errString.includes("busy") || errString.includes("unavailable")) {
+      narrative = "The mists of Oblivion swirl, and your connection to the threads of fate is temporarily lost. (Error: Gemini Model is Currently Busy / High Demand. Spikes in demand are temporary. Please try clicking Retry in a moment.)";
+    } else if (errString.includes("api key") || errString.includes("key is invalid") || errString.includes("api_key")) {
+      narrative = "The mists of Oblivion swirl, and your connection to the threads of fate is temporarily lost. (Error: Invalid or missing API Key. Please verify your environment configurations or Netlify API key setup.)";
+    } else {
+      narrative = `The mists of Oblivion swirl, and your connection to the threads of fate is temporarily lost. (Error: ${errMsg})`;
+    }
+    
     return {
-      narrative: "The mists of Oblivion swirl, and your connection to the threads of fate is temporarily lost. (Error communicating with the storyteller. Please try again.)",
-      error: (error as Error).message || "Unknown error",
+      narrative,
+      error: errMsg,
     };
   }
 };
